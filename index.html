@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="LunchDrop - quay mở hòm để chọn món ăn trưa ngẫu nhiên.">
+  <meta name="description" content="LunchDrop - quay mở hòm để chọn món ăn trưa ngẫu nhiên cùng đồng đội.">
   <title>LunchDrop — Hôm nay ăn gì?</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -17,10 +17,27 @@
       <span>LUNCH<span>DROP</span></span>
     </a>
     <div class="header-actions">
+      <div class="auth-controls">
+        <button class="google-sign-in" id="signInButton" type="button">
+          <span class="google-mark" aria-hidden="true">G</span>
+          <span id="signInLabel">ĐĂNG NHẬP <span class="wide-label">GOOGLE</span></span>
+        </button>
+        <div class="user-menu" id="userMenu" hidden>
+          <img class="user-avatar" id="userAvatar" alt="" referrerpolicy="no-referrer" hidden>
+          <span class="user-avatar user-avatar-fallback" id="userAvatarFallback" aria-hidden="true">?</span>
+          <span class="user-copy">
+            <small id="membershipLabel">ĐANG KIỂM TRA</small>
+            <strong id="userName">Thành viên</strong>
+          </span>
+          <button class="sign-out-button" id="signOutButton" type="button" aria-label="Đăng xuất" title="Đăng xuất">↪</button>
+        </div>
+      </div>
       <button class="icon-button" id="soundToggle" type="button" aria-label="Bật hoặc tắt âm thanh" aria-pressed="true">♪</button>
       <div class="spin-counter"><span>LƯỢT ĐÃ QUAY</span><strong id="spinCount">0</strong></div>
     </div>
   </header>
+
+  <div class="app-notice" id="appNotice" role="status" aria-live="polite" hidden></div>
 
   <main>
     <section class="hero" aria-labelledby="pageTitle">
@@ -50,11 +67,11 @@
       </div>
 
       <div class="case-controls">
-        <p id="statusText" aria-live="polite">Nhấn mở hòm và để số phận chọn bữa trưa cho bạn.</p>
-        <button class="open-button" id="openButton" type="button">
+        <p id="statusText" aria-live="polite">Đăng nhập bằng Google để mở hòm cùng mọi người.</p>
+        <button class="open-button" id="openButton" type="button" disabled data-state="connecting">
           <span class="button-shine"></span>
           <span class="button-icon" aria-hidden="true">◆</span>
-          <span class="button-copy"><b>MỞ HÒM NGAY</b><small>MIỄN PHÍ · KHÔNG HỐI HẬN</small></span>
+          <span class="button-copy"><b>ĐANG KẾT NỐI...</b><small>VUI LÒNG CHỜ MỘT CHÚT</small></span>
         </button>
       </div>
     </section>
@@ -69,10 +86,20 @@
 
     <section class="history-section" aria-labelledby="historyTitle">
       <div class="section-title-row">
-        <div><p class="section-kicker">RECENT DROPS</p><h2 id="historyTitle">LỊCH SỬ MỞ HÒM</h2></div>
+        <div><p class="section-kicker">MY RECENT DROPS</p><h2 id="historyTitle">LỊCH SỬ CỦA TÔI</h2></div>
         <button class="text-button" id="clearHistory" type="button">XÓA LỊCH SỬ</button>
       </div>
       <div class="history-list" id="historyList"></div>
+    </section>
+
+    <section class="community-section" aria-labelledby="communityTitle">
+      <div class="section-title-row">
+        <div><p class="section-kicker">TEAM LIVE DROPS</p><h2 id="communityTitle">MỌI NGƯỜI VỪA QUAY GÌ?</h2></div>
+        <div class="feed-status" id="feedStatusBadge" data-state="offline">
+          <i aria-hidden="true"></i><span id="feedStatus">CHƯA KẾT NỐI</span>
+        </div>
+      </div>
+      <div class="community-feed" id="communityFeed" aria-live="polite" aria-busy="true"></div>
     </section>
   </main>
 
@@ -92,6 +119,6 @@
   </dialog>
 
   <div class="confetti-layer" id="confettiLayer" aria-hidden="true"></div>
-  <script src="app.js"></script>
+  <script type="module" src="app.js"></script>
 </body>
 </html>
