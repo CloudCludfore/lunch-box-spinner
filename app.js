@@ -28,7 +28,7 @@ const foods = [
   { id: 'bun-cha', name: 'Bún chả', emoji: '\u{1F356}', rarity: 'uncommon', weight: 7, price: '45K+', tag: 'Nướng thơm', description: 'Chả nướng xém cạnh ăn cùng bún, rau sống và nước chấm chua ngọt đúng điệu.' },
   { id: 'banh-cuon', name: 'Bánh cuốn', emoji: '\u{1F95F}', rarity: 'uncommon', weight: 7, price: '30–50K', tag: 'Nhẹ bụng', description: 'Bánh cuốn mềm mỏng, hành phi thơm và chả lụa — gọn nhẹ mà vẫn đủ sức qua buổi chiều.' },
   { id: 'my-cay', name: 'Mỳ cay', emoji: '\u{1F336}\uFE0F', rarity: 'rare', weight: 4, price: '52–75K', tag: 'Cay nóng', description: 'Một tô mỳ cay nóng hổi với vị cay bùng nổ, dành cho ngày cần đánh thức mọi giác quan.' },
-  { id: 'banh-my-chao', name: 'Bánh mỳ chảo', emoji: '\u{1F373}', rarity: 'rare', weight: 4, price: '45–55K', tag: 'Đầy đặn', description: 'Bánh mỳ giòn ăn cùng trứng, pate và nước sốt nóng trong chảo — no lâu và rất bắt vị.' },
+  { id: 'banh-my-chao', name: 'Bánh mỳ chảo', emoji: '\u{1F373}', rarity: 'epic', weight: 4, price: '45–55K', tag: 'Đầy đặn', description: 'Bánh mỳ giòn ăn cùng trứng, pate và nước sốt nóng trong chảo — no lâu và rất bắt vị.' },
   { id: 'lau-my-cay', name: 'Lẩu mỳ cay', emoji: '\u{1FAD5}', rarity: 'legendary', weight: 1.5, price: '350K', tag: 'Rủ đồng đội', description: 'Nồi lẩu mỳ cay nghi ngút khói với topping đầy đặn, phù hợp để cả team cùng chinh phục.' },
   { id: 'bia', name: 'Bia', emoji: '\u{1F37A}', rarity: 'legendary', weight: 1.5, price: 'Unlimited', tag: 'Không giới hạn', description: 'Bia không giới hạn đã xuất hiện — một kết quả huyền thoại dành cho cuộc vui thật dài.' }
 ];
