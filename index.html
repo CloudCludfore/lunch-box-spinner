@@ -46,6 +46,22 @@
       <p class="hero-copy">Mở hòm, chốt món. Không họp, không tranh luận, không “ăn gì cũng được”.</p>
     </section>
 
+    <section class="community-section" aria-labelledby="communityTitle">
+      <div class="section-title-row">
+        <div class="community-heading-copy">
+          <p class="section-kicker">TEAM LIVE DROPS</p>
+          <h2 id="communityTitle">MỌI NGƯỜI VỪA QUAY GÌ?</h2>
+          <p class="community-subtitle">Kết quả mới nhất từ đồng đội được cập nhật theo thời gian thực.</p>
+        </div>
+        <div class="feed-status" id="feedStatusBadge" data-state="offline">
+          <i aria-hidden="true"></i><span id="feedStatus">CHƯA KẾT NỐI</span>
+        </div>
+      </div>
+      <div class="community-feed-frame">
+        <div class="community-feed" id="communityFeed" aria-live="polite" aria-busy="true" aria-label="Các kết quả quay gần đây của nhóm" tabindex="0"></div>
+      </div>
+    </section>
+
     <section class="case-panel" aria-labelledby="caseTitle">
       <div class="case-heading">
         <div>
@@ -90,16 +106,6 @@
         <button class="text-button" id="clearHistory" type="button">XÓA LỊCH SỬ</button>
       </div>
       <div class="history-list" id="historyList"></div>
-    </section>
-
-    <section class="community-section" aria-labelledby="communityTitle">
-      <div class="section-title-row">
-        <div><p class="section-kicker">TEAM LIVE DROPS</p><h2 id="communityTitle">MỌI NGƯỜI VỪA QUAY GÌ?</h2></div>
-        <div class="feed-status" id="feedStatusBadge" data-state="offline">
-          <i aria-hidden="true"></i><span id="feedStatus">CHƯA KẾT NỐI</span>
-        </div>
-      </div>
-      <div class="community-feed" id="communityFeed" aria-live="polite" aria-busy="true"></div>
     </section>
   </main>
 
