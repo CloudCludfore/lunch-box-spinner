@@ -1,28 +1,17 @@
 const foods = [
-  { id: 'com-tam', name: 'Cơm tấm sườn bì', emoji: '🍛', rarity: 'common', weight: 7, price: '45–60K', tag: 'Quốc dân', description: 'Sườn nướng thơm lừng, bì chả đầy đủ — lựa chọn an toàn nhưng không bao giờ nhàm chán.' },
-  { id: 'banh-mi', name: 'Bánh mì đặc biệt', emoji: '🥖', rarity: 'common', weight: 7, price: '25–40K', tag: 'Nhanh gọn', description: 'Giòn rụm bên ngoài, đầy đặn bên trong. Ăn nhanh để còn tranh thủ ngủ trưa.' },
-  { id: 'bun-thit-nuong', name: 'Bún thịt nướng', emoji: '🥗', rarity: 'common', weight: 7, price: '40–55K', tag: 'Dễ ăn', description: 'Thịt nướng, rau xanh, đồ chua và nước mắm — combo cân bằng của mọi buổi trưa.' },
-  { id: 'com-ga', name: 'Cơm gà xối mỡ', emoji: '🍗', rarity: 'common', weight: 7, price: '45–60K', tag: 'No căng', description: 'Da gà giòn tan, cơm vàng thơm béo. Chiều nay chắc chắn làm việc rất có năng lượng.' },
-  { id: 'banh-cuon', name: 'Bánh cuốn nóng', emoji: '🥟', rarity: 'common', weight: 7, price: '30–45K', tag: 'Nhẹ bụng', description: 'Bánh mỏng mềm, hành phi thơm và chả lụa. Nhẹ nhàng nhưng vẫn đủ sức qua buổi chiều.' },
-  { id: 'xoi-man', name: 'Xôi mặn thập cẩm', emoji: '🍚', rarity: 'common', weight: 7, price: '25–40K', tag: 'Chắc bụng', description: 'Một phần nhỏ nhưng sức mạnh lớn. Phù hợp cho ngày deadline đang dí sát.' },
+  { id: 'com-pho-bo', name: 'Cơm phở bò', emoji: '\u{1F35C}', rarity: 'common', weight: 6, price: '50–65K', tag: 'Bò thơm', description: 'Phở bò nóng hổi với nước dùng đậm đà và thịt bò mềm, hợp cho một bữa trưa ấm bụng.' },
+  { id: 'com-pho-ga', name: 'Cơm phở gà', emoji: '\u{1F414}', rarity: 'common', weight: 6, price: '50–70K', tag: 'Thanh vị', description: 'Phở gà thanh ngọt, thịt gà mềm và thơm, nhẹ nhàng nhưng vẫn đủ no cho buổi chiều.' },
 
-  { id: 'pho-bo', name: 'Phở bò tái nạm', emoji: '🍜', rarity: 'uncommon', weight: 6, price: '50–75K', tag: 'Kinh điển', description: 'Nước dùng nóng hổi, thịt bò mềm và chút hành thơm — một drop rất khó để chê.' },
-  { id: 'bun-bo-hue', name: 'Bún bò Huế', emoji: '🥘', rarity: 'uncommon', weight: 6, price: '50–70K', tag: 'Đậm vị', description: 'Cay thơm, đậm đà, topping ngập mặt. Món này đủ sức đánh thức mọi cuộc họp chiều.' },
-  { id: 'bun-cha', name: 'Bún chả Hà Nội', emoji: '🍲', rarity: 'uncommon', weight: 6, price: '50–70K', tag: 'Nướng thơm', description: 'Chả nướng xém cạnh, nước chấm chua ngọt và rau sống. Một lựa chọn rất biết chiều lòng người.' },
-  { id: 'mi-quang', name: 'Mì Quảng', emoji: '🍝', rarity: 'uncommon', weight: 6, price: '45–65K', tag: 'Miền Trung', description: 'Sợi mì dai, nước dùng đậm, bánh tráng giòn — bữa trưa có đủ mọi kết cấu thú vị.' },
-  { id: 'com-chien', name: 'Cơm chiên Dương Châu', emoji: '🥡', rarity: 'uncommon', weight: 6, price: '45–65K', tag: 'Đầy đặn', description: 'Cơm rang tơi hạt cùng đủ loại topping. Không hào nhoáng, nhưng hiệu quả tuyệt đối.' },
+  { id: 'bun-rieu', name: 'Bún riêu', emoji: '\u{1F345}', rarity: 'uncommon', weight: 7, price: '45K+', tag: 'Chua thanh', description: 'Nước dùng chua dịu, riêu cua thơm béo và cà chua đậm vị — một lựa chọn quen thuộc dễ ăn.' },
+  { id: 'bun-suon-chua', name: 'Bún sườn chua', emoji: '\u{1F958}', rarity: 'uncommon', weight: 7, price: '45K+', tag: 'Chua ngọt', description: 'Sườn mềm, nước dùng chua thanh và rau thơm tạo nên một tô bún tròn vị.' },
+  { id: 'bun-cha', name: 'Bún chả', emoji: '\u{1F356}', rarity: 'uncommon', weight: 7, price: '45K+', tag: 'Nướng thơm', description: 'Chả nướng xém cạnh ăn cùng bún, rau sống và nước chấm chua ngọt đúng điệu.' },
+  { id: 'banh-cuon', name: 'Bánh cuốn', emoji: '\u{1F95F}', rarity: 'uncommon', weight: 7, price: '30–50K', tag: 'Nhẹ bụng', description: 'Bánh cuốn mềm mỏng, hành phi thơm và chả lụa — gọn nhẹ mà vẫn đủ sức qua buổi chiều.' },
 
-  { id: 'pizza', name: 'Pizza phô mai', emoji: '🍕', rarity: 'rare', weight: 4, price: '90–150K', tag: 'Đổi gió', description: 'Đế nóng giòn và phô mai kéo sợi. Hôm nay bạn xứng đáng với một bữa trưa hơi quá tay.' },
-  { id: 'sushi', name: 'Sushi set', emoji: '🍣', rarity: 'rare', weight: 4, price: '120–180K', tag: 'Nhật Bản', description: 'Một set sushi tươi gọn gàng, đẹp mắt. Bữa trưa nay bỗng nhiên sang hẳn lên.' },
-  { id: 'ga-han', name: 'Gà rán Hàn Quốc', emoji: '🍗', rarity: 'rare', weight: 4, price: '90–140K', tag: 'Giòn cay', description: 'Vỏ giòn, sốt cay ngọt bám đều. Chuẩn bị thêm nước và bỏ qua chuyện đếm calories.' },
-  { id: 'ramen', name: 'Ramen Tonkotsu', emoji: '🍜', rarity: 'rare', weight: 4, price: '100–160K', tag: 'Umami', description: 'Nước dùng xương hầm béo ngậy, mì dai và trứng lòng đào — drop hiếm rất đáng tiền.' },
+  { id: 'my-cay', name: 'Mỳ cay', emoji: '\u{1F336}\uFE0F', rarity: 'rare', weight: 4, price: '52–75K', tag: 'Cay nóng', description: 'Một tô mỳ cay nóng hổi với vị cay bùng nổ, dành cho ngày cần đánh thức mọi giác quan.' },
+  { id: 'banh-my-chao', name: 'Bánh mỳ chảo', emoji: '\u{1F373}', rarity: 'rare', weight: 4, price: '45–55K', tag: 'Đầy đặn', description: 'Bánh mỳ giòn ăn cùng trứng, pate và nước sốt nóng trong chảo — no lâu và rất bắt vị.' },
 
-  { id: 'lau-thai', name: 'Lẩu Thái hải sản', emoji: '🍲', rarity: 'epic', weight: 3, price: '250–400K', tag: 'Rủ đồng đội', description: 'Chua cay bùng nổ và hải sản đầy nồi. Drop này bắt buộc phải kéo cả team đi cùng.' },
-  { id: 'steak', name: 'Beefsteak medium rare', emoji: '🥩', rarity: 'epic', weight: 3, price: '250–450K', tag: 'Sang xịn', description: 'Miếng bò mọng nước áp chảo vừa tới. Ví có thể buồn, nhưng vị giác chắc chắn vui.' },
-  { id: 'sashimi', name: 'Sashimi thượng hạng', emoji: '🐟', rarity: 'epic', weight: 3, price: '300–500K', tag: 'Tươi sống', description: 'Cá tươi cắt dày, vị ngọt tự nhiên. Một bữa trưa chất lượng ở cấp độ sử thi.' },
-
-  { id: 'buffet-hai-san', name: 'Buffet hải sản', emoji: '🦞', rarity: 'legendary', weight: 1.5, price: '600K+', tag: 'Tất tay', description: 'Tôm, cua, hàu và không giới hạn. Huyền thoại đã xuất hiện — chiều nay xin phép nghỉ tiêu hóa.' },
-  { id: 'omakase', name: 'Omakase', emoji: '👨‍🍳', rarity: 'legendary', weight: 1.5, price: '1.000K+', tag: 'Chef chọn', description: 'Giao toàn bộ bữa ăn cho đầu bếp. Bạn vừa random ra một trải nghiệm đúng nghĩa.' }
+  { id: 'lau-my-cay', name: 'Lẩu mỳ cay', emoji: '\u{1FAD5}', rarity: 'legendary', weight: 1.5, price: '350K', tag: 'Rủ đồng đội', description: 'Nồi lẩu mỳ cay nghi ngút khói với topping đầy đặn, phù hợp để cả team cùng chinh phục.' },
+  { id: 'bia', name: 'Bia', emoji: '\u{1F37A}', rarity: 'legendary', weight: 1.5, price: 'Unlimited', tag: 'Không giới hạn', description: 'Bia không giới hạn đã xuất hiện — một kết quả huyền thoại dành cho cuộc vui thật dài.' }
 ];
 
 const rarityInfo = {
@@ -118,12 +107,15 @@ function buildIdleTrack() {
 }
 
 function renderOdds() {
-  const odds = Object.keys(rarityInfo).map((rarity) => ({
-    rarity,
-    percentage: foods
+  const totalWeight = foods.reduce((sum, food) => sum + food.weight, 0);
+  const odds = Object.keys(rarityInfo).map((rarity) => {
+    const rarityWeight = foods
       .filter((food) => food.rarity === rarity)
-      .reduce((sum, food) => sum + food.weight, 0)
-  }));
+      .reduce((sum, food) => sum + food.weight, 0);
+    const percentage = totalWeight > 0 ? (rarityWeight / totalWeight) * 100 : 0;
+
+    return { rarity, percentage };
+  });
 
   const fragment = document.createDocumentFragment();
   odds.forEach(({ rarity, percentage }) => {
@@ -136,7 +128,8 @@ function renderOdds() {
     const label = document.createElement('strong');
     label.textContent = rarityInfo[rarity].label;
     const value = document.createElement('span');
-    value.textContent = `${percentage}%`;
+    const formattedPercentage = Number.isInteger(percentage) ? percentage : percentage.toFixed(1);
+    value.textContent = `${formattedPercentage}%`;
 
     card.append(line, label, value);
     fragment.append(card);
