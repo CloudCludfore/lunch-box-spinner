@@ -39,14 +39,59 @@ const confettiLayer = document.querySelector('#confettiLayer');
 
 const HISTORY_KEY = 'lunchdrop-history-v1';
 const COUNT_KEY = 'lunchdrop-spin-count-v1';
+const SCHEDULER_KEY = 'lunchdrop-scheduler-v1';
+const SCHEDULER_VERSION = 1;
+const WEIGHT_SIGNATURE = foods.map((food) => `${food.id}:${food.weight}`).join('|');
 const WINNER_INDEX = 48;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function createSchedulerState(lastFoodId = null) {
+  return {
+    currentById: Object.fromEntries(foods.map((food) => [food.id, 0])),
+    lastFoodId: foods.some((food) => food.id === lastFoodId) ? lastFoodId : null
+  };
+}
+
+function readSchedulerState(lastFoodId = null) {
+  const fallback = createSchedulerState(lastFoodId);
+
+  try {
+    const saved = JSON.parse(localStorage.getItem(SCHEDULER_KEY) || 'null');
+    if (saved?.version !== SCHEDULER_VERSION || saved.weightSignature !== WEIGHT_SIGNATURE) return fallback;
+
+    const totalWeight = foods.reduce((sum, food) => sum + Math.max(0, food.weight), 0);
+    const currentById = { ...fallback.currentById };
+    foods.forEach((food) => {
+      const score = Number(saved.currentById?.[food.id]);
+      if (Number.isFinite(score)) currentById[food.id] = Math.max(-totalWeight, Math.min(totalWeight, score));
+    });
+
+    const savedLastFoodId = foods.some((food) => food.id === saved.lastFoodId) ? saved.lastFoodId : fallback.lastFoodId;
+    return { currentById, lastFoodId: savedLastFoodId };
+  } catch {
+    return fallback;
+  }
+}
+
+function saveSchedulerState() {
+  try {
+    localStorage.setItem(SCHEDULER_KEY, JSON.stringify({
+      version: SCHEDULER_VERSION,
+      weightSignature: WEIGHT_SIGNATURE,
+      currentById: schedulerState.currentById,
+      lastFoodId: schedulerState.lastFoodId
+    }));
+  } catch {
+    // Keep scheduling in memory when storage is unavailable.
+  }
+}
 
 let spinning = false;
 let soundEnabled = true;
 let audioContext = null;
 let history = readHistory();
 let spinCount = readSpinCount();
+let schedulerState = readSchedulerState(history[0]?.foodId);
 let lastResult = null;
 
 function randomUnit() {
@@ -68,6 +113,29 @@ function weightedPick() {
   }
 
   return foods[foods.length - 1];
+}
+
+function nextWeightedRoundRobin() {
+  const activeFoods = foods.filter((food) => Number.isFinite(food.weight) && food.weight > 0);
+  if (!activeFoods.length) return foods[0];
+
+  const totalWeight = activeFoods.reduce((sum, food) => sum + food.weight, 0);
+  activeFoods.forEach((food) => {
+    schedulerState.currentById[food.id] = (schedulerState.currentById[food.id] || 0) + food.weight;
+  });
+
+  const alternatives = activeFoods.filter((food) => food.id !== schedulerState.lastFoodId);
+  const selectableFoods = alternatives.length ? alternatives : activeFoods;
+  let winner = selectableFoods[0];
+
+  for (const food of selectableFoods.slice(1)) {
+    if (schedulerState.currentById[food.id] > schedulerState.currentById[winner.id]) winner = food;
+  }
+
+  schedulerState.currentById[winner.id] -= totalWeight;
+  schedulerState.lastFoodId = winner.id;
+  saveSchedulerState();
+  return winner;
 }
 
 function createFoodCard(food) {
@@ -258,7 +326,7 @@ function spin() {
   if (resultDialog.open) resultDialog.close();
 
   spinning = true;
-  lastResult = weightedPick();
+  lastResult = nextWeightedRoundRobin();
   const reel = Array.from({ length: 58 }, () => weightedPick());
   reel[WINNER_INDEX] = lastResult;
   renderTrack(reel);
@@ -320,7 +388,7 @@ function showResult(food) {
 
 function launchConfetti(primaryColor, count) {
   if (reducedMotion) return;
-  const colors = [primaryColor, '#ffffff', '#ffb000', '#ff7a00'];
+  const colors = [primaryColor, '#ffffff', '#ec1c24', '#d71920'];
   const fragment = document.createDocumentFragment();
 
   for (let index = 0; index < count; index += 1) {
