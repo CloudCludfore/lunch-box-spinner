@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="LunchDrop - quay mở hòm để chọn món ăn trưa ngẫu nhiên.">
+  <title>LunchDrop — Hôm nay ăn gì?</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="LunchDrop - Trang chủ">
+      <span class="brand-mark" aria-hidden="true">LD</span>
+      <span>LUNCH<span>DROP</span></span>
+    </a>
+    <div class="header-actions">
+      <button class="icon-button" id="soundToggle" type="button" aria-label="Bật hoặc tắt âm thanh" aria-pressed="true">♪</button>
+      <div class="spin-counter"><span>LƯỢT ĐÃ QUAY</span><strong id="spinCount">0</strong></div>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="pageTitle">
+      <p class="eyebrow"><span></span> LUNCH DECISION ENGINE</p>
+      <h1 id="pageTitle">HÔM NAY <em>ĂN GÌ?</em></h1>
+      <p class="hero-copy">Mở hòm, chốt món. Không họp, không tranh luận, không “ăn gì cũng được”.</p>
+    </section>
+
+    <section class="case-panel" aria-labelledby="caseTitle">
+      <div class="case-heading">
+        <div>
+          <p class="section-kicker">HÒM ĐANG CHỌN</p>
+          <h2 id="caseTitle">HÒM TRƯA HUYỀN THOẠI</h2>
+        </div>
+        <div class="live-badge"><i></i> ĐANG MỞ</div>
+      </div>
+
+      <div class="roulette-shell">
+        <div class="pointer pointer-top"></div>
+        <div class="pointer-line"></div>
+        <div class="pointer pointer-bottom"></div>
+        <div class="roulette-fade fade-left"></div>
+        <div class="roulette-fade fade-right"></div>
+        <div class="roulette-viewport" id="rouletteViewport">
+          <div class="roulette-track" id="rouletteTrack"></div>
+        </div>
+      </div>
+
+      <div class="case-controls">
+        <p id="statusText" aria-live="polite">Nhấn mở hòm và để số phận chọn bữa trưa cho bạn.</p>
+        <button class="open-button" id="openButton" type="button">
+          <span class="button-shine"></span>
+          <span class="button-icon" aria-hidden="true">◆</span>
+          <span class="button-copy"><b>MỞ HÒM NGAY</b><small>MIỄN PHÍ · KHÔNG HỐI HẬN</small></span>
+        </button>
+      </div>
+    </section>
+
+    <section class="odds-section" aria-labelledby="oddsTitle">
+      <div class="section-title-row">
+        <div><p class="section-kicker">DROP RATE</p><h2 id="oddsTitle">TỶ LỆ XUẤT HIỆN</h2></div>
+        <p>Món càng hiếm, bữa trưa càng “cháy ví”.</p>
+      </div>
+      <div class="odds-grid" id="oddsGrid"></div>
+    </section>
+
+    <section class="history-section" aria-labelledby="historyTitle">
+      <div class="section-title-row">
+        <div><p class="section-kicker">RECENT DROPS</p><h2 id="historyTitle">LỊCH SỬ MỞ HÒM</h2></div>
+        <button class="text-button" id="clearHistory" type="button">XÓA LỊCH SỬ</button>
+      </div>
+      <div class="history-list" id="historyList"></div>
+    </section>
+  </main>
+
+  <footer><span>LUNCHDROP © 2026</span><p>Được tạo ra để chấm dứt câu hỏi khó nhất lúc 11:30.</p></footer>
+
+  <dialog class="result-dialog" id="resultDialog">
+    <div class="result-glow" id="resultGlow"></div>
+    <button class="dialog-close" id="closeDialog" type="button" aria-label="Đóng">×</button>
+    <p class="result-overline">BỮA TRƯA ĐÃ ĐƯỢC CHỌN</p>
+    <div class="result-rarity" id="resultRarity"></div>
+    <div class="result-emoji" id="resultEmoji"></div>
+    <h2 id="resultName"></h2>
+    <p id="resultDescription"></p>
+    <div class="result-meta"><span id="resultPrice"></span><span id="resultTag"></span></div>
+    <button class="accept-button" id="acceptResult" type="button">CHỐT MÓN NÀY</button>
+    <button class="reroll-button" id="rerollButton" type="button">Không phục? Quay lại</button>
+  </dialog>
+
+  <div class="confetti-layer" id="confettiLayer" aria-hidden="true"></div>
+  <script src="app.js"></script>
+</body>
+</html>
