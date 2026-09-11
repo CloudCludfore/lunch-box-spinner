@@ -48,10 +48,17 @@ Push lên branch `main`. Workflow `.github/workflows/deploy-pages.yml` sẽ depl
 
 ## Mô hình dữ liệu
 
-- `allowedUsers/{email}`: danh sách email được phép dùng ứng dụng, gồm `active` và `displayName`.
-- `spins/{autoId}`: kết quả gồm `uid`, `authorName`, `foodId` và `createdAt`.
-- Lịch sử cá nhân, bộ đếm và trạng thái phân phối món vẫn được giữ trong `localStorage` của từng trình duyệt.
-- Kết quả chưa gửi được cũng được giữ trong một outbox ở `localStorage`; app dùng cùng document ID khi retry và xóa khỏi outbox sau khi Firestore xác nhận.
-- Feed chung chỉ tải 20 kết quả gần nhất. Thành viên chỉ được tạo kết quả mang UID và tên đã cấu hình của chính mình; không ai được sửa hoặc xóa kết quả từ frontend.
+> **Quan trọng sau khi cập nhật code:** chép lại nội dung `firestore.rules` vào **Firestore Database > Rules** và bấm **Publish**. Nếu chưa publish rules mới, thao tác reaction và chốt món sẽ trả về `permission-denied`.
 
-Kết quả quay vẫn được chọn ở trình duyệt. Security Rules ngăn người ngoài và giới hạn schema, nhưng một thành viên có kiến thức kỹ thuật vẫn có thể tự gọi Firestore với một `foodId` hợp lệ. Nếu cần chống gian lận tuyệt đối, phải chuyển việc chọn món sang backend đáng tin cậy (thường cần gói có billing).
+- `allowedUsers/{email}`: danh sách email được phép dùng ứng dụng, gồm `active` và `displayName`.
+- `spins/{autoId}`: kết quả quay gồm `uid`, `authorName`, `foodId` và `createdAt`.
+- `spins/{spinId}/reactions/{uid}`: reaction của một thành viên cho một kết quả, gồm `uid`, `type` (`eat`, `reroll` hoặc `fire`) và `updatedAt`. Document ID là Firebase Auth UID nên mỗi người chỉ có tối đa một reaction trên mỗi Live Drop; bấm lại cùng reaction sẽ xóa nó.
+- `dailyDecisions/{YYYY-MM-DD}`: món được chốt theo ngày Việt Nam (`Asia/Ho_Chi_Minh`), gồm `dateKey`, `spinId`, `foodId`, người chốt và `createdAt`.
+
+App dùng transaction khi chốt món nên nếu nhiều người thao tác cùng lúc, chỉ document được tạo đầu tiên thành công. Daily decision chỉ được tạo mới; Security Rules không cho frontend sửa hoặc xóa. Nếu quản trị viên thật sự cần đính chính, hãy xử lý trực tiếp trong Firebase Console.
+
+Lịch sử cá nhân, bộ đếm và trạng thái phân phối món vẫn được giữ trong `localStorage` của từng trình duyệt. Kết quả chưa gửi được cũng nằm trong một outbox ở `localStorage`; app dùng cùng document ID khi retry và xóa khỏi outbox sau khi Firestore xác nhận.
+
+Feed chung chỉ tải 20 kết quả gần nhất và mở tối đa khoảng 20 listener reaction, phù hợp với nhóm nhỏ. Thiết kế không cần Cloud Functions hay gói có billing, nhưng số lượt đọc Firestore vẫn tăng theo số thành viên và reaction; nên theo dõi tab **Usage** để không vượt quota Spark.
+
+Security Rules bảo đảm thành viên chỉ được ghi reaction ở document UID của mình, giới hạn loại reaction, đối chiếu món đã chốt với spin gốc và không cho sửa/xóa spin hoặc daily decision từ frontend. Việc quay và khóa ngày vẫn được khởi tạo ở trình duyệt: một thành viên có kiến thức kỹ thuật vẫn có thể tự gửi một `foodId` hợp lệ hoặc chủ động tạo trước document của một ngày tương lai hợp lệ, khiến ngày đó bị khóa cho tới khi quản trị viên xử lý trong Firebase Console. Đây là đánh đổi để giữ kiến trúc thuần client/free-tier; nếu cần chống gian lận tuyệt đối, phải chuyển logic tin cậy sang backend (thường cần bật billing).

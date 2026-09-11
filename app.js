@@ -8,6 +8,7 @@ import {
 } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js';
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getFirestore,
@@ -15,6 +16,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc
 } from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js';
@@ -67,6 +69,7 @@ const appNotice = document.querySelector('#appNotice');
 const communityFeed = document.querySelector('#communityFeed');
 const feedStatus = document.querySelector('#feedStatus');
 const feedStatusBadge = document.querySelector('#feedStatusBadge');
+const dailyDecisionElement = document.querySelector('#dailyDecision');
 
 const HISTORY_KEY = 'lunchdrop-history-v1';
 const COUNT_KEY = 'lunchdrop-spin-count-v1';
@@ -76,6 +79,14 @@ const SCHEDULER_VERSION = 1;
 const WEIGHT_SIGNATURE = foods.map((food) => `${food.id}:${food.weight}`).join('|');
 const WINNER_INDEX = 48;
 const FEED_LIMIT = 20;
+const DAILY_TIME_ZONE = 'Asia/Ho_Chi_Minh';
+const REALTIME_RETRY_DELAY = 5000;
+const SPIN_SYNC_TIMEOUT = 10000;
+const REACTION_OPTIONS = Object.freeze({
+  eat: { emoji: '👍', label: 'Ăn món này' },
+  reroll: { emoji: '🔄', label: 'Quay lại' },
+  fire: { emoji: '🔥', label: 'Quá ngon' }
+});
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 const firebaseConfigured = ['apiKey', 'authDomain', 'projectId', 'appId'].every((key) => {
   const value = firebaseConfig?.[key];
@@ -131,6 +142,7 @@ let spinCount = readSpinCount();
 let spinOutbox = readSpinOutbox();
 let schedulerState = readSchedulerState(history[0]?.foodId);
 let lastResult = null;
+let lastCompletedSpinId = null;
 let spinOwner = null;
 let spinDocumentId = null;
 let auth = null;
@@ -144,8 +156,25 @@ let membershipState = 'idle';
 let authStateSequence = 0;
 let feedUnsubscribe = null;
 let membershipUnsubscribe = null;
+let dailyDecisionUnsubscribe = null;
+let dailyDecisionRetryTimer = null;
+let dailyDecisionSubscriptionVersion = 0;
+let dailyDecisionDateKey = '';
+let dailyDecision = null;
+let dailyDecisionStatus = 'idle';
+let decisionSaving = false;
+let decisionSavingVersion = 0;
+let latestFeedEntries = [];
 let outboxFlushPromise = null;
 let noticeTimer = null;
+const spinSyncPromises = new Map();
+const reactionStateBySpin = new Map();
+const confirmedReactionBySpin = new Map();
+const reactionUnsubscribes = new Map();
+const reactionRetryTimers = new Map();
+const reactionTerminalFailures = new Set();
+const reactionMutationVersions = new Map();
+let reactionSubscriptionVersion = 0;
 
 function randomUnit() {
   if (window.crypto?.getRandomValues) {
@@ -400,12 +429,232 @@ function formatFeedTime(value) {
   return `${day} · ${time}`;
 }
 
+function getTodayKey(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: DAILY_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return values.year && values.month && values.day
+    ? `${values.year}-${values.month}-${values.day}`
+    : date.toISOString().slice(0, 10);
+}
+
+function formatDecisionTime(value) {
+  const date = typeof value?.toDate === 'function' ? value.toDate() : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return date.toLocaleTimeString('vi-VN', {
+    timeZone: DAILY_TIME_ZONE,
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+function getReactionSummary(spinId) {
+  const counts = Object.fromEntries(Object.keys(REACTION_OPTIONS).map((type) => [type, 0]));
+  const reactions = reactionStateBySpin.get(spinId) || new Map();
+  reactions.forEach((type) => {
+    if (Object.hasOwn(counts, type)) counts[type] += 1;
+  });
+  return {
+    counts,
+    mine: currentUser ? reactions.get(currentUser.uid) || null : null
+  };
+}
+
+function getDecisionButtonLabel(entry, isSelected) {
+  if (isSelected) return '✓ MÓN HÔM NAY';
+  if (entry?.pending) return 'ĐANG LƯU...';
+  if (decisionSaving) return 'ĐANG CHỐT...';
+  if (dailyDecisionStatus === 'loading') return 'ĐANG KIỂM TRA...';
+  if (dailyDecisionStatus === 'error') return 'KHÔNG THỂ CHỐT';
+  return 'CHỐT HÔM NAY';
+}
+
+function updateAcceptResultButton() {
+  const hasResult = Boolean(lastCompletedSpinId && lastResult?.id);
+  const canFinalize = hasResult
+    && membershipState === 'allowed'
+    && dailyDecisionStatus === 'ready'
+    && !dailyDecision
+    && !decisionSaving;
+  acceptResultButton.disabled = !canFinalize;
+
+  if (dailyDecision || dailyDecisionStatus === 'selected') {
+    acceptResultButton.textContent = 'NHÓM ĐÃ CHỐT MÓN HÔM NAY';
+  } else if (decisionSaving) {
+    acceptResultButton.textContent = 'ĐANG CHỐT MÓN...';
+  } else if (dailyDecisionStatus === 'loading') {
+    acceptResultButton.textContent = 'ĐANG KIỂM TRA QUYẾT ĐỊNH...';
+  } else if (dailyDecisionStatus === 'error') {
+    acceptResultButton.textContent = 'CHƯA THỂ CHỐT LÚC NÀY';
+  } else if (membershipState !== 'allowed') {
+    acceptResultButton.textContent = 'ĐĂNG NHẬP ĐỂ CHỐT';
+  } else {
+    acceptResultButton.textContent = 'CHỐT MÓN NÀY';
+  }
+}
+
+function renderDailyDecision() {
+  if (!dailyDecisionElement) return;
+
+  const icon = document.createElement('div');
+  icon.className = 'daily-decision-icon';
+  const copy = document.createElement('div');
+  copy.className = 'daily-decision-copy';
+  const label = document.createElement('small');
+  label.textContent = 'MÓN ĐÃ CHỐT HÔM NAY';
+  const title = document.createElement('strong');
+  const meta = document.createElement('span');
+  copy.append(label, title, meta);
+
+  if (dailyDecision) {
+    const food = foods.find((item) => item.id === dailyDecision.foodId);
+    const eatVotes = getReactionSummary(dailyDecision.spinId).counts.eat;
+    dailyDecisionElement.dataset.state = 'selected';
+    icon.textContent = food?.emoji || '◆';
+    title.textContent = food?.name || 'Món đã chốt';
+    const time = formatDecisionTime(dailyDecision.createdAt);
+    const details = [`Bởi ${dailyDecision.chosenByName || 'một thành viên'}`];
+    if (time) details.push(time);
+    if (eatVotes > 0) details.push(`${eatVotes} phiếu muốn ăn`);
+    meta.textContent = details.join(' · ');
+
+    const badge = document.createElement('span');
+    badge.className = 'daily-decision-badge';
+    badge.textContent = 'ĐÃ CHỐT';
+    dailyDecisionElement.replaceChildren(icon, copy, badge);
+    updateAcceptResultButton();
+    return;
+  }
+
+  icon.textContent = decisionSaving || dailyDecisionStatus === 'loading' ? '…' : '◇';
+  if (decisionSaving) {
+    dailyDecisionElement.dataset.state = 'saving';
+    title.textContent = 'Đang chốt món...';
+    meta.textContent = 'Đang xác nhận với Firestore.';
+  } else if (membershipState !== 'allowed') {
+    dailyDecisionElement.dataset.state = 'locked';
+    title.textContent = 'Đăng nhập để xem quyết định hôm nay';
+    meta.textContent = 'Chỉ thành viên trong nhóm mới có quyền truy cập.';
+  } else if (dailyDecisionStatus === 'loading') {
+    dailyDecisionElement.dataset.state = 'loading';
+    title.textContent = 'Đang kiểm tra món hôm nay...';
+    meta.textContent = 'Nút chốt sẽ mở sau khi Firestore phản hồi.';
+  } else if (dailyDecisionStatus === 'error') {
+    dailyDecisionElement.dataset.state = 'error';
+    icon.textContent = '!';
+    title.textContent = 'Chưa thể tải quyết định hôm nay';
+    meta.textContent = 'Ứng dụng sẽ tự kết nối lại sau ít giây.';
+  } else {
+    dailyDecisionElement.dataset.state = 'empty';
+    title.textContent = 'Chưa có món nào được chốt';
+    meta.textContent = 'Bình chọn rồi chọn một Live Drop bên dưới.';
+  }
+  dailyDecisionElement.replaceChildren(icon, copy);
+  updateAcceptResultButton();
+}
+
+function createReactionButton(spinId, type, isPending) {
+  const option = REACTION_OPTIONS[type];
+  const summary = getReactionSummary(spinId);
+  const button = document.createElement('button');
+  button.className = 'reaction-button';
+  button.type = 'button';
+  button.dataset.spinId = spinId;
+  button.dataset.reaction = type;
+  button.disabled = isPending || membershipState !== 'allowed';
+  button.setAttribute('aria-pressed', String(summary.mine === type));
+  button.setAttribute('aria-label', `${option.label}: ${summary.counts[type]} lượt`);
+
+  const emoji = document.createElement('span');
+  emoji.className = 'reaction-emoji';
+  emoji.textContent = option.emoji;
+  emoji.setAttribute('aria-hidden', 'true');
+  const text = document.createElement('span');
+  text.className = 'reaction-label';
+  text.textContent = option.label;
+  const count = document.createElement('span');
+  count.className = 'reaction-count';
+  count.textContent = String(summary.counts[type]);
+  button.append(emoji, text, count);
+  return button;
+}
+
+function createFeedActions(entry) {
+  const actions = document.createElement('div');
+  actions.className = 'feed-actions';
+  const reactions = document.createElement('div');
+  reactions.className = 'reaction-group';
+  Object.keys(REACTION_OPTIONS).forEach((type) => {
+    reactions.append(createReactionButton(entry.id, type, entry.pending));
+  });
+
+  const decisionButton = document.createElement('button');
+  decisionButton.className = 'decision-button';
+  decisionButton.type = 'button';
+  decisionButton.dataset.spinId = entry.id;
+  decisionButton.dataset.foodId = entry.foodId;
+  const isSelected = dailyDecision?.spinId === entry.id;
+  decisionButton.hidden = Boolean(dailyDecision) && !isSelected;
+  decisionButton.disabled = decisionSaving
+    || entry.pending
+    || Boolean(dailyDecision)
+    || dailyDecisionStatus !== 'ready'
+    || membershipState !== 'allowed';
+  decisionButton.textContent = getDecisionButtonLabel(entry, isSelected);
+  if (isSelected) decisionButton.classList.add('is-selected');
+
+  actions.append(reactions, decisionButton);
+  return actions;
+}
+
+function findFeedItem(spinId) {
+  return Array.from(communityFeed.querySelectorAll('.feed-item'))
+    .find((item) => item.dataset.spinId === spinId) || null;
+}
+
+function updateReactionControls(spinId) {
+  const item = findFeedItem(spinId);
+  const summary = getReactionSummary(spinId);
+  if (item) {
+    item.querySelectorAll('.reaction-button').forEach((button) => {
+      const type = button.dataset.reaction;
+      const count = summary.counts[type] || 0;
+      button.querySelector('.reaction-count').textContent = String(count);
+      button.setAttribute('aria-pressed', String(summary.mine === type));
+      button.setAttribute('aria-label', `${REACTION_OPTIONS[type].label}: ${count} lượt`);
+    });
+  }
+  if (dailyDecision?.spinId === spinId) renderDailyDecision();
+}
+
+function updateDecisionControls() {
+  communityFeed.querySelectorAll('.decision-button').forEach((button) => {
+    const entry = latestFeedEntries.find((item) => item.id === button.dataset.spinId);
+    const isSelected = dailyDecision?.spinId === button.dataset.spinId;
+    button.hidden = Boolean(dailyDecision) && !isSelected;
+    button.disabled = decisionSaving
+      || Boolean(dailyDecision)
+      || dailyDecisionStatus !== 'ready'
+      || Boolean(entry?.pending)
+      || membershipState !== 'allowed';
+    button.textContent = getDecisionButtonLabel(entry, isSelected);
+    button.classList.toggle('is-selected', isSelected);
+  });
+  renderDailyDecision();
+}
+
 function renderCommunityFeed(entries) {
   if (!entries.length) {
     renderFeedMessage('Chưa có kết quả nào. Hãy là người đầu tiên mở hòm cho cả nhóm xem.');
     return;
   }
 
+  const previousFirstId = communityFeed.querySelector('.feed-item')?.dataset.spinId || null;
+  const previousScrollTop = communityFeed.scrollTop;
   const fragment = document.createDocumentFragment();
   entries.forEach((entry) => {
     const food = foods.find((item) => item.id === entry.foodId);
@@ -414,6 +663,7 @@ function renderCommunityFeed(entries) {
     const item = document.createElement('article');
     item.className = 'feed-item';
     item.dataset.rarity = food.rarity;
+    item.dataset.spinId = entry.id;
     if (entry.pending) item.classList.add('is-pending');
 
     const authorName = typeof entry.authorName === 'string' && entry.authorName.trim()
@@ -445,7 +695,7 @@ function renderCommunityFeed(entries) {
     emoji.textContent = food.emoji;
     emoji.setAttribute('aria-hidden', 'true');
 
-    item.append(avatar, copy, emoji);
+    item.append(avatar, copy, emoji, createFeedActions(entry));
     fragment.append(item);
   });
 
@@ -456,6 +706,8 @@ function renderCommunityFeed(entries) {
 
   communityFeed.replaceChildren(fragment);
   communityFeed.setAttribute('aria-busy', 'false');
+  const nextFirstId = communityFeed.querySelector('.feed-item')?.dataset.spinId || null;
+  communityFeed.scrollTop = previousFirstId && previousFirstId === nextFirstId ? previousScrollTop : 0;
 }
 
 function showNotice(message, tone = 'info', duration = 6000) {
@@ -546,14 +798,193 @@ function renderSpinButton() {
   renderAuthControls();
 }
 
+function stopReactionSubscriptions() {
+  reactionSubscriptionVersion += 1;
+  reactionUnsubscribes.forEach((unsubscribe) => unsubscribe());
+  reactionRetryTimers.forEach((timerId) => window.clearTimeout(timerId));
+  reactionUnsubscribes.clear();
+  reactionRetryTimers.clear();
+  reactionTerminalFailures.clear();
+  reactionStateBySpin.clear();
+  confirmedReactionBySpin.clear();
+  reactionMutationVersions.clear();
+}
+
 function stopFeed() {
   if (feedUnsubscribe) feedUnsubscribe();
   feedUnsubscribe = null;
+  latestFeedEntries = [];
+  stopReactionSubscriptions();
+}
+
+function stopDailyDecision(cancelPending = true) {
+  if (dailyDecisionUnsubscribe) dailyDecisionUnsubscribe();
+  if (dailyDecisionRetryTimer) window.clearTimeout(dailyDecisionRetryTimer);
+  dailyDecisionUnsubscribe = null;
+  dailyDecisionRetryTimer = null;
+  dailyDecisionSubscriptionVersion += 1;
+  dailyDecisionDateKey = '';
+  dailyDecision = null;
+  dailyDecisionStatus = 'idle';
+  if (cancelPending) {
+    decisionSaving = false;
+    decisionSavingVersion += 1;
+  }
+  renderDailyDecision();
 }
 
 function stopMembership() {
   if (membershipUnsubscribe) membershipUnsubscribe();
   membershipUnsubscribe = null;
+}
+
+function syncReactionSubscriptions(entries = latestFeedEntries) {
+  if (!database || membershipState !== 'allowed') return;
+
+  const wantedIds = new Set(entries.map((entry) => entry.id).filter(Boolean));
+  if (dailyDecision?.spinId) wantedIds.add(dailyDecision.spinId);
+
+  reactionUnsubscribes.forEach((unsubscribe, spinId) => {
+    if (wantedIds.has(spinId)) return;
+    unsubscribe();
+    reactionUnsubscribes.delete(spinId);
+    const retryTimer = reactionRetryTimers.get(spinId);
+    if (retryTimer) window.clearTimeout(retryTimer);
+    reactionRetryTimers.delete(spinId);
+    reactionTerminalFailures.delete(spinId);
+    reactionStateBySpin.delete(spinId);
+    confirmedReactionBySpin.delete(spinId);
+  });
+  reactionRetryTimers.forEach((timerId, spinId) => {
+    if (wantedIds.has(spinId)) return;
+    window.clearTimeout(timerId);
+    reactionRetryTimers.delete(spinId);
+    reactionStateBySpin.delete(spinId);
+    confirmedReactionBySpin.delete(spinId);
+    reactionMutationVersions.delete(spinId);
+  });
+  reactionTerminalFailures.forEach((spinId) => {
+    if (wantedIds.has(spinId)) return;
+    reactionTerminalFailures.delete(spinId);
+    reactionStateBySpin.delete(spinId);
+    confirmedReactionBySpin.delete(spinId);
+    reactionMutationVersions.delete(spinId);
+  });
+
+  wantedIds.forEach((spinId) => {
+    if (
+      reactionUnsubscribes.has(spinId)
+      || reactionRetryTimers.has(spinId)
+      || reactionTerminalFailures.has(spinId)
+    ) return;
+    const subscriptionAuthSequence = authStateSequence;
+    const subscriptionVersion = reactionSubscriptionVersion;
+    let unsubscribe = null;
+    unsubscribe = onSnapshot(
+      collection(database, 'spins', spinId, 'reactions'),
+      { includeMetadataChanges: true },
+      (snapshot) => {
+        if (
+          subscriptionVersion !== reactionSubscriptionVersion
+          || subscriptionAuthSequence !== authStateSequence
+          || reactionUnsubscribes.get(spinId) !== unsubscribe
+        ) return;
+
+        const reactions = new Map();
+        snapshot.docs.forEach((reactionDocument) => {
+          const data = reactionDocument.data();
+          if (Object.hasOwn(REACTION_OPTIONS, data.type)) reactions.set(reactionDocument.id, data.type);
+        });
+        reactionStateBySpin.set(spinId, reactions);
+
+        const currentUid = currentUser?.uid;
+        const ownDocument = currentUid
+          ? snapshot.docs.find((reactionDocument) => reactionDocument.id === currentUid)
+          : null;
+        if (currentUid) {
+          if (ownDocument && !ownDocument.metadata.hasPendingWrites) {
+            const confirmedType = ownDocument.data().type;
+            confirmedReactionBySpin.set(
+              spinId,
+              Object.hasOwn(REACTION_OPTIONS, confirmedType) ? confirmedType : null
+            );
+          } else if (!ownDocument && !snapshot.metadata.hasPendingWrites) {
+            confirmedReactionBySpin.set(spinId, null);
+          }
+        }
+        updateReactionControls(spinId);
+      },
+      (error) => {
+        if (
+          subscriptionVersion !== reactionSubscriptionVersion
+          || subscriptionAuthSequence !== authStateSequence
+          || reactionUnsubscribes.get(spinId) !== unsubscribe
+        ) return;
+
+        reactionUnsubscribes.delete(spinId);
+        console.error(`Cannot subscribe to reactions for ${spinId}:`, error);
+        if (['permission-denied', 'unauthenticated', 'failed-precondition', 'invalid-argument'].includes(error?.code)) {
+          reactionTerminalFailures.add(spinId);
+          return;
+        }
+
+        const retryTimer = window.setTimeout(() => {
+          reactionRetryTimers.delete(spinId);
+          if (
+            subscriptionVersion === reactionSubscriptionVersion
+            && subscriptionAuthSequence === authStateSequence
+            && membershipState === 'allowed'
+          ) {
+            syncReactionSubscriptions();
+          }
+        }, REALTIME_RETRY_DELAY);
+        reactionRetryTimers.set(spinId, retryTimer);
+      }
+    );
+    reactionUnsubscribes.set(spinId, unsubscribe);
+  });
+}
+
+function subscribeToDailyDecision() {
+  stopDailyDecision(false);
+  const subscribedDateKey = getTodayKey();
+  const subscriptionVersion = dailyDecisionSubscriptionVersion;
+  dailyDecisionDateKey = subscribedDateKey;
+  dailyDecisionStatus = 'loading';
+  renderDailyDecision();
+
+  dailyDecisionUnsubscribe = onSnapshot(
+    doc(database, 'dailyDecisions', subscribedDateKey),
+    { includeMetadataChanges: true },
+    (snapshot) => {
+      if (subscriptionVersion !== dailyDecisionSubscriptionVersion) return;
+      dailyDecision = snapshot.exists()
+        ? { id: snapshot.id, ...snapshot.data({ serverTimestamps: 'estimate' }) }
+        : null;
+      dailyDecisionStatus = dailyDecision ? 'selected' : 'ready';
+      updateDecisionControls();
+      syncReactionSubscriptions();
+    },
+    (error) => {
+      if (subscriptionVersion !== dailyDecisionSubscriptionVersion) return;
+      console.error('Cannot subscribe to daily decision:', error);
+      dailyDecisionUnsubscribe = null;
+      dailyDecision = null;
+      dailyDecisionStatus = 'error';
+      updateDecisionControls();
+      dailyDecisionRetryTimer = window.setTimeout(() => {
+        dailyDecisionRetryTimer = null;
+        if (
+          membershipState === 'allowed'
+          && dailyDecisionDateKey === subscribedDateKey
+          && getTodayKey() === subscribedDateKey
+          && !dailyDecisionUnsubscribe
+        ) {
+          subscribeToDailyDecision();
+        }
+      }, REALTIME_RETRY_DELAY);
+    }
+  );
 }
 
 function subscribeToFeed() {
@@ -571,7 +1002,7 @@ function subscribeToFeed() {
     feedQuery,
     { includeMetadataChanges: true },
     (snapshot) => {
-      const entries = snapshot.docs.map((item) => ({
+      latestFeedEntries = snapshot.docs.map((item) => ({
         ...item.data({ serverTimestamps: 'estimate' }),
         id: item.id,
         pending: item.metadata.hasPendingWrites
@@ -581,24 +1012,225 @@ function subscribeToFeed() {
         ? `${snapshot.size} KẾT QUẢ · OFFLINE`
         : `${snapshot.size} KẾT QUẢ GẦN NHẤT`;
       setFeedStatus(statusLabel, statusState);
-      renderCommunityFeed(entries);
+      renderCommunityFeed(latestFeedEntries);
+      syncReactionSubscriptions();
     },
     (error) => {
       console.error('Cannot subscribe to shared spins:', error);
+      latestFeedEntries = [];
+      stopReactionSubscriptions();
       setFeedStatus('LỖI REALTIME', 'error');
       renderFeedMessage('Không thể tải feed chung. Hãy kiểm tra Firestore Rules và kết nối mạng.', 'error');
     }
   );
 }
 
+async function toggleReaction(spinId, type) {
+  if (!database || !currentUser || membershipState !== 'allowed' || !Object.hasOwn(REACTION_OPTIONS, type)) return;
+  const entry = latestFeedEntries.find((item) => item.id === spinId);
+  if (entry?.pending) {
+    showNotice('Hãy chờ kết quả được đồng bộ trước khi thả reaction.', 'warning');
+    return;
+  }
+
+  const actorUid = currentUser.uid;
+  const actorAuthSequence = authStateSequence;
+  const reactions = new Map(reactionStateBySpin.get(spinId) || []);
+  const previousType = reactions.get(actorUid) || null;
+  const nextType = previousType === type ? null : type;
+  if (nextType) reactions.set(actorUid, nextType);
+  else reactions.delete(actorUid);
+  reactionStateBySpin.set(spinId, reactions);
+  updateReactionControls(spinId);
+
+  const mutation = { actorUid, actorAuthSequence };
+  reactionMutationVersions.set(spinId, mutation);
+  const reactionReference = doc(database, 'spins', spinId, 'reactions', actorUid);
+
+  try {
+    if (nextType) {
+      await setDoc(reactionReference, {
+        uid: actorUid,
+        type: nextType,
+        updatedAt: serverTimestamp()
+      });
+    } else {
+      await deleteDoc(reactionReference);
+    }
+    if (reactionMutationVersions.get(spinId) === mutation) {
+      reactionMutationVersions.delete(spinId);
+    }
+  } catch (error) {
+    console.error('Cannot update reaction:', error);
+    if (reactionMutationVersions.get(spinId) !== mutation) return;
+
+    reactionMutationVersions.delete(spinId);
+    if (actorAuthSequence !== authStateSequence || currentUser?.uid !== actorUid) return;
+
+    const rollback = new Map(reactionStateBySpin.get(spinId) || []);
+    const confirmedType = confirmedReactionBySpin.get(spinId) || null;
+    if (confirmedType) rollback.set(actorUid, confirmedType);
+    else rollback.delete(actorUid);
+    reactionStateBySpin.set(spinId, rollback);
+    updateReactionControls(spinId);
+    showNotice('Không thể cập nhật reaction. Hãy kiểm tra kết nối rồi thử lại.', 'error');
+  }
+}
+
+async function finalizeDailyDecision(spinId, foodId = null) {
+  if (!database || !currentUser || membershipState !== 'allowed' || decisionSaving) return;
+
+  const requestedDateKey = getTodayKey();
+  if (dailyDecisionDateKey !== requestedDateKey) {
+    subscribeToDailyDecision();
+    showNotice('Đang kiểm tra quyết định của ngày mới. Hãy thử lại sau ít giây.', 'warning');
+    return;
+  }
+  if (dailyDecision) {
+    showNotice('Nhóm đã chốt món cho hôm nay rồi.', 'warning');
+    return;
+  }
+  if (dailyDecisionStatus === 'loading') {
+    showNotice('Đang kiểm tra món hôm nay với Firestore.', 'warning');
+    return;
+  }
+  if (dailyDecisionStatus === 'error') {
+    showNotice('Chưa thể xác nhận món hôm nay. Ứng dụng đang kết nối lại.', 'error');
+    return;
+  }
+  if (dailyDecisionStatus !== 'ready') return;
+
+  const entry = latestFeedEntries.find((item) => item.id === spinId);
+  const selectedFoodId = foodId || entry?.foodId;
+  const food = foods.find((item) => item.id === selectedFoodId);
+  if (!spinId || !food) {
+    showNotice('Không tìm thấy kết quả để chốt.', 'error');
+    return;
+  }
+
+  const actorUid = currentUser.uid;
+  const actorName = memberDisplayName;
+  const authSequence = authStateSequence;
+  const operationVersion = ++decisionSavingVersion;
+  decisionSaving = true;
+  updateDecisionControls();
+
+  try {
+    await ensureSpinSyncedForDecision(spinId, actorUid, actorName);
+    if (
+      authSequence !== authStateSequence
+      || currentUser?.uid !== actorUid
+      || membershipState !== 'allowed'
+      || memberDisplayName !== actorName
+    ) {
+      const error = new Error('Authentication changed while saving daily decision');
+      error.code = 'decision/auth-changed';
+      throw error;
+    }
+    if (getTodayKey() !== requestedDateKey) {
+      const error = new Error('Date changed while saving daily decision');
+      error.code = 'decision/date-changed';
+      throw error;
+    }
+
+    await runTransaction(database, async (transaction) => {
+      if (getTodayKey() !== requestedDateKey) {
+        const error = new Error('Date changed before transaction read');
+        error.code = 'decision/date-changed';
+        throw error;
+      }
+
+      const decisionReference = doc(database, 'dailyDecisions', requestedDateKey);
+      const spinReference = doc(database, 'spins', spinId);
+      const existingDecision = await transaction.get(decisionReference);
+      if (existingDecision.exists()) {
+        const error = new Error('Daily decision already exists');
+        error.code = 'decision/already-exists';
+        throw error;
+      }
+
+      const spinSnapshot = await transaction.get(spinReference);
+      if (!spinSnapshot.exists() || spinSnapshot.data().foodId !== food.id) {
+        const error = new Error('Spin is not available');
+        error.code = 'decision/spin-unavailable';
+        throw error;
+      }
+      if (getTodayKey() !== requestedDateKey) {
+        const error = new Error('Date changed before transaction write');
+        error.code = 'decision/date-changed';
+        throw error;
+      }
+
+      transaction.set(decisionReference, {
+        dateKey: requestedDateKey,
+        spinId,
+        foodId: food.id,
+        chosenByUid: actorUid,
+        chosenByName: actorName,
+        createdAt: serverTimestamp()
+      });
+    });
+
+    if (decisionSavingVersion !== operationVersion) return;
+    const dayChangedAfterCommit = getTodayKey() !== requestedDateKey;
+    if (!dayChangedAfterCommit && dailyDecisionDateKey === requestedDateKey && !dailyDecision) {
+      dailyDecision = {
+        id: requestedDateKey,
+        dateKey: requestedDateKey,
+        spinId,
+        foodId: food.id,
+        chosenByUid: actorUid,
+        chosenByName: actorName,
+        createdAt: null
+      };
+      dailyDecisionStatus = 'selected';
+    }
+
+    if (dayChangedAfterCommit) {
+      subscribeToDailyDecision();
+      statusText.textContent = `${food.name} đã được chốt cho ngày ${requestedDateKey}.`;
+      showNotice(`Đã chốt ${food.name} cho ngày ${requestedDateKey}; ngày mới vừa bắt đầu.`, 'warning');
+    } else {
+      statusText.textContent = `${food.name} đã được chốt cho bữa trưa hôm nay!`;
+      showNotice(`Đã chốt ${food.name} cho cả nhóm.`, 'success');
+    }
+  } catch (error) {
+    console.error('Cannot finalize daily decision:', error);
+    if (decisionSavingVersion !== operationVersion) return;
+
+    if (error?.code === 'decision/already-exists') {
+      subscribeToDailyDecision();
+      showNotice('Một thành viên khác vừa chốt món hôm nay.', 'warning');
+    } else if (error?.code === 'decision/spin-unavailable') {
+      showNotice('Kết quả này chưa đồng bộ xong. Hãy thử lại sau ít giây.', 'warning');
+    } else if (error?.code === 'decision/spin-sync-timeout') {
+      showNotice('Kết quả chưa lên máy chủ. App sẽ tiếp tục đồng bộ khi có mạng.', 'warning');
+    } else if (error?.code === 'decision/date-changed') {
+      subscribeToDailyDecision();
+      showNotice('Ngày mới vừa bắt đầu. Hãy chọn lại món cho hôm nay.', 'warning');
+    } else if (error?.code === 'decision/auth-changed') {
+      showNotice('Phiên đăng nhập đã thay đổi. Hãy thử chốt lại.', 'warning');
+    } else {
+      showNotice('Không thể chốt món hôm nay. Hãy kiểm tra kết nối và Firestore Rules.', 'error');
+    }
+  } finally {
+    if (decisionSavingVersion === operationVersion) {
+      decisionSaving = false;
+      updateDecisionControls();
+    }
+  }
+}
+
 function applyAuthState(user) {
   const sequence = ++authStateSequence;
   stopFeed();
+  stopDailyDecision();
   stopMembership();
   currentUser = user;
   memberDisplayName = '';
   membershipState = user ? 'checking' : 'idle';
   authReady = true;
+  renderDailyDecision();
   renderSpinButton();
 
   if (!user) {
@@ -629,6 +1261,7 @@ function applyAuthState(user) {
         memberDisplayName = '';
         membershipState = 'checking';
         stopFeed();
+        stopDailyDecision();
         renderSpinButton();
         setFeedStatus('ĐANG XÁC MINH', 'loading');
         renderFeedMessage('Đang xác minh quyền thành viên với máy chủ...', 'loading');
@@ -644,6 +1277,7 @@ function applyAuthState(user) {
         memberDisplayName = '';
         membershipState = 'denied';
         stopFeed();
+        stopDailyDecision();
         renderSpinButton();
         setFeedStatus('CHƯA ĐƯỢC DUYỆT', 'blocked');
         renderFeedMessage(`Email ${email} chưa được kích hoạt trong allowedUsers.`, 'blocked');
@@ -655,6 +1289,7 @@ function applyAuthState(user) {
         memberDisplayName = '';
         membershipState = 'error';
         stopFeed();
+        stopDailyDecision();
         renderSpinButton();
         setFeedStatus('THIẾU TÊN THÀNH VIÊN', 'error');
         renderFeedMessage(`Document allowedUsers/${email} cần field displayName.`, 'error');
@@ -666,7 +1301,10 @@ function applyAuthState(user) {
       membershipState = 'allowed';
       renderSpinButton();
       statusText.textContent = `Xin chào ${memberDisplayName}! Hòm trưa đã sẵn sàng.`;
-      if (!wasAllowed) subscribeToFeed();
+      if (!wasAllowed) {
+        subscribeToDailyDecision();
+        subscribeToFeed();
+      }
       void flushSpinOutbox();
     },
     (error) => {
@@ -675,6 +1313,7 @@ function applyAuthState(user) {
       memberDisplayName = '';
       membershipState = 'error';
       stopFeed();
+      stopDailyDecision();
       renderSpinButton();
       setFeedStatus('LỖI PHÂN QUYỀN', 'error');
       renderFeedMessage('Không thể kiểm tra thành viên. Hãy chắc chắn Firestore đã được tạo và firestore.rules đã được publish.', 'error');
@@ -773,6 +1412,69 @@ function initializeFirebaseServices() {
   }
 }
 
+function syncSpinOutboxEntry(entry, authorName) {
+  const existingPromise = spinSyncPromises.get(entry.id);
+  if (existingPromise) return existingPromise;
+
+  let syncPromise = null;
+  syncPromise = (async () => {
+    const spinReference = doc(database, 'spins', entry.id);
+    const existingSpin = await getDoc(spinReference);
+    if (existingSpin.exists()) {
+      const existingData = existingSpin.data();
+      if (existingData.uid !== entry.uid || existingData.foodId !== entry.foodId) {
+        removeFromSpinOutbox(entry.id);
+        const error = new Error('Spin outbox ID collision');
+        error.code = 'spin/id-collision';
+        throw error;
+      }
+      removeFromSpinOutbox(entry.id);
+      return;
+    }
+
+    await setDoc(spinReference, {
+      uid: entry.uid,
+      authorName,
+      foodId: entry.foodId,
+      createdAt: serverTimestamp()
+    });
+    removeFromSpinOutbox(entry.id);
+  })().finally(() => {
+    if (spinSyncPromises.get(entry.id) === syncPromise) spinSyncPromises.delete(entry.id);
+  });
+
+  spinSyncPromises.set(entry.id, syncPromise);
+  return syncPromise;
+}
+
+async function ensureSpinSyncedForDecision(spinId, actorUid, actorName) {
+  const pendingEntry = spinOutbox.find((entry) => entry.id === spinId);
+  if (!pendingEntry) return;
+  if (pendingEntry.uid !== actorUid) {
+    const error = new Error('Spin belongs to another auth session');
+    error.code = 'decision/spin-unavailable';
+    throw error;
+  }
+
+  let timeoutId = null;
+  const timeoutPromise = new Promise((resolve, reject) => {
+    timeoutId = window.setTimeout(() => {
+      const error = new Error('Timed out while syncing selected spin');
+      error.code = 'decision/spin-sync-timeout';
+      reject(error);
+    }, SPIN_SYNC_TIMEOUT);
+  });
+
+  try {
+    await Promise.race([
+      syncSpinOutboxEntry(pendingEntry, actorName),
+      timeoutPromise
+    ]);
+  } finally {
+    if (timeoutId) window.clearTimeout(timeoutId);
+  }
+}
+
 function flushSpinOutbox() {
   if (outboxFlushPromise) return outboxFlushPromise;
   if (!database || !currentUser || membershipState !== 'allowed' || !memberDisplayName || !spinOutbox.length) {
@@ -780,6 +1482,7 @@ function flushSpinOutbox() {
   }
 
   const ownerUid = currentUser.uid;
+  const ownerName = memberDisplayName;
   outboxFlushPromise = (async () => {
     const pendingEntries = spinOutbox.filter((entry) => entry.uid === ownerUid);
 
@@ -787,28 +1490,14 @@ function flushSpinOutbox() {
       if (currentUser?.uid !== ownerUid || membershipState !== 'allowed') break;
 
       try {
-        const spinReference = doc(database, 'spins', entry.id);
-        const existingSpin = await getDoc(spinReference);
-        if (existingSpin.exists()) {
-          const existingData = existingSpin.data();
-          if (existingData.uid !== entry.uid || existingData.foodId !== entry.foodId) {
-            console.error('Spin outbox ID collision:', entry.id);
-            showNotice('Một kết quả chờ đồng bộ bị xung đột và đã được bỏ qua.', 'error');
-          }
-          removeFromSpinOutbox(entry.id);
-          continue;
-        }
-
-        await setDoc(spinReference, {
-          uid: entry.uid,
-          authorName: memberDisplayName,
-          foodId: entry.foodId,
-          createdAt: serverTimestamp()
-        });
-        removeFromSpinOutbox(entry.id);
+        await syncSpinOutboxEntry(entry, ownerName);
       } catch (error) {
         console.error('Cannot flush shared spin:', error);
-        showNotice('Kết quả đã được giữ lại trên máy và sẽ tự đồng bộ khi kết nối phục hồi.', 'warning');
+        if (error?.code === 'spin/id-collision') {
+          showNotice('Một kết quả chờ đồng bộ bị xung đột và đã được bỏ qua.', 'error');
+        } else {
+          showNotice('Kết quả đã được giữ lại trên máy và sẽ tự đồng bộ khi kết nối phục hồi.', 'warning');
+        }
         break;
       }
     }
@@ -907,6 +1596,7 @@ function spin() {
 function finishSpin(food) {
   const completedBy = spinOwner;
   const completedDocumentId = spinDocumentId;
+  lastCompletedSpinId = completedDocumentId;
   spinOwner = null;
   spinDocumentId = null;
   spinning = false;
@@ -935,6 +1625,7 @@ function showResult(food) {
   document.querySelector('#resultPrice').textContent = food.price;
   document.querySelector('#resultTag').textContent = food.tag;
 
+  updateAcceptResultButton();
   resultDialog.showModal();
   launchConfetti(rarity.color, food.rarity === 'legendary' ? 70 : 38);
 }
@@ -963,6 +1654,19 @@ function launchConfetti(primaryColor, count) {
 openButton.addEventListener('click', spin);
 signInButton.addEventListener('click', () => void signInWithGoogle());
 signOutButton.addEventListener('click', () => void signOutUser());
+communityFeed.addEventListener('click', (event) => {
+  const target = event.target instanceof Element ? event.target : null;
+  const reactionButton = target?.closest('.reaction-button');
+  if (reactionButton) {
+    void toggleReaction(reactionButton.dataset.spinId, reactionButton.dataset.reaction);
+    return;
+  }
+
+  const decisionButton = target?.closest('.decision-button');
+  if (decisionButton) {
+    void finalizeDailyDecision(decisionButton.dataset.spinId, decisionButton.dataset.foodId);
+  }
+});
 userAvatar.addEventListener('error', () => {
   userAvatar.hidden = true;
   userAvatarFallback.hidden = false;
@@ -973,8 +1677,13 @@ rerollButton.addEventListener('click', () => {
 });
 closeDialogButton.addEventListener('click', () => resultDialog.close());
 acceptResultButton.addEventListener('click', () => {
-  resultDialog.close();
-  statusText.textContent = `${lastResult?.name || 'Món ăn'} đã được chốt. Chúc bạn ngon miệng!`;
+  if (acceptResultButton.disabled) return;
+  const completedSpinId = lastCompletedSpinId;
+  const completedFoodId = lastResult?.id || null;
+  if (completedSpinId && completedFoodId) {
+    void finalizeDailyDecision(completedSpinId, completedFoodId);
+    resultDialog.close();
+  }
 });
 resultDialog.addEventListener('click', (event) => {
   if (event.target === resultDialog) resultDialog.close();
@@ -991,12 +1700,18 @@ soundToggle.addEventListener('click', () => {
   if (soundEnabled) playTone(720, 0.06, 0.035);
 });
 window.addEventListener('online', () => void flushSpinOutbox());
+window.setInterval(() => {
+  if (database && membershipState === 'allowed' && getTodayKey() !== dailyDecisionDateKey) {
+    subscribeToDailyDecision();
+  }
+}, 60000);
 
 buildIdleTrack();
 renderOdds();
 renderHistory();
 spinCountElement.textContent = String(spinCount);
 renderFeedMessage('Đang khởi tạo kết nối Firebase...', 'loading');
+renderDailyDecision();
 renderAuthControls();
 renderSpinButton();
 initializeFirebaseServices();

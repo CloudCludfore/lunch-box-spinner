@@ -15,6 +15,21 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/allowedUsers/$(request.auth.token.email)).data.displayName is string;
     }
 
+    function isValidFoodId(foodId) {
+      return foodId in [
+        'com-pho-bo',
+        'com-pho-ga',
+        'bun-rieu',
+        'bun-suon-chua',
+        'bun-cha',
+        'banh-cuon',
+        'my-cay',
+        'banh-my-chao',
+        'lau-my-cay',
+        'bia'
+      ];
+    }
+
     // Add allowed email addresses as document IDs from the Firebase Console.
     // Members can watch only their own membership document; they cannot list the group.
     match /allowedUsers/{email} {
@@ -39,20 +54,51 @@ service cloud.firestore {
         && request.resource.data.authorName is string
         && request.resource.data.authorName.size() > 0
         && request.resource.data.authorName.size() <= 80
-        && request.resource.data.authorName
-          == get(/databases/$(database)/documents/allowedUsers/$(request.auth.token.email)).data.displayName
-        && request.resource.data.foodId in [
-          'com-pho-bo',
-          'com-pho-ga',
-          'bun-rieu',
-          'bun-suon-chua',
-          'bun-cha',
-          'banh-cuon',
-          'my-cay',
-          'banh-my-chao',
-          'lau-my-cay',
-          'bia'
-        ]
+        && request.resource.data.authorName == get(/databases/$(database)/documents/allowedUsers/$(request.auth.token.email)).data.displayName
+        && isValidFoodId(request.resource.data.foodId)
+        && request.resource.data.createdAt == request.time;
+
+      allow update, delete: if false;
+    }
+
+    match /spins/{spinId}/reactions/{uid} {
+      allow get, list: if isAllowedMember();
+
+      allow create, update: if isAllowedMember()
+        && uid == request.auth.uid
+        && exists(/databases/$(database)/documents/spins/$(spinId))
+        && request.resource.data.keys().hasOnly(['uid', 'type', 'updatedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.type in ['eat', 'reroll', 'fire']
+        && request.resource.data.updatedAt == request.time;
+
+      allow delete: if isAllowedMember()
+        && uid == request.auth.uid
+        && resource.data.uid == request.auth.uid;
+    }
+
+    match /dailyDecisions/{dateKey} {
+      allow get: if isAllowedMember();
+      allow list: if false;
+
+      allow create: if isAllowedMember()
+        && dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.keys().hasOnly([
+          'dateKey',
+          'spinId',
+          'foodId',
+          'chosenByUid',
+          'chosenByName',
+          'createdAt'
+        ])
+        && request.resource.data.dateKey == dateKey
+        && request.resource.data.spinId is string
+        && request.resource.data.chosenByUid == request.auth.uid
+        && request.resource.data.chosenByName == get(/databases/$(database)/documents/allowedUsers/$(request.auth.token.email)).data.displayName
+        && isValidFoodId(request.resource.data.foodId)
+        && exists(/databases/$(database)/documents/spins/$(request.resource.data.spinId))
+        && get(/databases/$(database)/documents/spins/$(request.resource.data.spinId)).data.foodId
+          == request.resource.data.foodId
         && request.resource.data.createdAt == request.time;
 
       allow update, delete: if false;
